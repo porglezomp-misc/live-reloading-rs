@@ -1,11 +1,11 @@
 [package]
-name = "reload-app"
+name = "reload-demo"
 version = "0.1.0"
 authors = ["Caleb Jones <code@calebjones.net>"]
 
 [lib]
 name = "reloadapp"
-crate-type = ["dylib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-reload-api = { version="0.1", path="../reload-api" }
+live-reload = { version="0.2", path="../live-reload" }

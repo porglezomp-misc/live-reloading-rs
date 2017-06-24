@@ -3,7 +3,6 @@ extern crate notify;
 extern crate libloading;
 
 use std::path::{Path, PathBuf};
-use std::os::raw::c_void;
 use std::time::Duration;
 use std::sync::mpsc::{channel, Receiver};
 
@@ -90,7 +89,7 @@ impl App {
         // @Avoid reallocating if unnecessary
         self.realloc_buffer((unsafe { &**sym.api }.size)());
         unsafe {
-            ((**sym.api).load)(Self::get_state_ptr(&mut self.state));
+            ((**sym.api).reload)(Self::get_state_ptr(&mut self.state));
         }
         self.sym = Some(sym);
 
@@ -133,8 +132,8 @@ impl App {
         self.state.resize(alloc_size_u64s, 0);
     }
 
-    unsafe fn get_state_ptr(buffer: &mut Vec<u64>) -> *mut c_void {
-        buffer.as_mut_ptr() as *mut c_void
+    unsafe fn get_state_ptr(buffer: &mut Vec<u64>) -> *mut () {
+        buffer.as_mut_ptr() as *mut ()
     }
 }
 
@@ -158,51 +157,51 @@ pub enum ShouldQuit {
 #[repr(C)]
 pub struct _ReloadApi {
     pub size: fn() -> usize,
-    pub init: fn(*mut c_void),
-    pub load: fn(*mut c_void),
-    pub update: fn(*mut c_void) -> ShouldQuit,
-    pub unload: fn(*mut c_void),
-    pub deinit: fn(*mut c_void),
+    pub init: fn(*mut ()),
+    pub reload: fn(*mut ()),
+    pub update: fn(*mut ()) -> ShouldQuit,
+    pub unload: fn(*mut ()),
+    pub deinit: fn(*mut ()),
 }
 
 #[macro_export]
-macro_rules! reload_api {
+macro_rules! live_reload {
     (state: $State:ty;
      init: $init:ident;
-     load: $load:ident;
+     reload: $reload:ident;
      update: $update:ident;
      unload: $unload:ident;
      deinit: $deinit:ident;) => {
 
-        fn cast<'a>(raw_state: *mut ::std::os::raw::c_void) -> &'a mut $State {
+        fn cast<'a>(raw_state: *mut ()) -> &'a mut $State {
             unsafe { &mut *(raw_state as *mut $State) }
         }
 
-        fn init_wrapper(raw_state: *mut ::std::os::raw::c_void) {
+        fn init_wrapper(raw_state: *mut ()) {
             $init(cast(raw_state))
         }
 
-        fn load_wrapper(raw_state: *mut ::std::os::raw::c_void) {
-            $load(cast(raw_state))
+        fn reload_wrapper(raw_state: *mut ()) {
+            $reload(cast(raw_state))
         }
 
-        fn update_wrapper(raw_state: *mut ::std::os::raw::c_void) -> ShouldQuit {
+        fn update_wrapper(raw_state: *mut ()) -> ::live_reload::ShouldQuit {
             $update(cast(raw_state))
         }
 
-        fn unload_wrapper(raw_state: *mut ::std::os::raw::c_void) {
+        fn unload_wrapper(raw_state: *mut ()) {
             $unload(cast(raw_state))
         }
 
-        fn deinit_wrapper(raw_state: *mut ::std::os::raw::c_void) {
+        fn deinit_wrapper(raw_state: *mut ()) {
             $deinit(cast(raw_state))
         }
 
         #[no_mangle]
-        pub static RELOAD_API: ::reload_api::_ReloadApi = ::reload_api::_ReloadApi {
+        pub static RELOAD_API: ::live_reload::_ReloadApi = ::live_reload::_ReloadApi {
             size: ::std::mem::size_of::<$State>,
             init: init_wrapper,
-            load: load_wrapper,
+            reload: reload_wrapper,
             update: update_wrapper,
             unload: unload_wrapper,
             deinit: deinit_wrapper,

@@ -1,6 +1,6 @@
 [package]
-name = "reload-api"
-version = "0.1.0"
+name = "live-reload"
+version = "0.2.0"
 authors = ["Caleb Jones <code@calebjones.net>"]
 
 [dependencies]

@@ -1,16 +1,19 @@
-#[macro_use] extern crate reload_api;
+#[macro_use] extern crate live_reload;
 
-use reload_api::ShouldQuit;
+use std::io::Write;
 
-reload_api! {
+use live_reload::ShouldQuit;
+
+live_reload! {
     state: State;
     init: init;
-    load: load;
+    reload: reload;
     update: update;
     unload: unload;
     deinit: deinit;
 }
 
+#[repr(C)]
 struct State {
     counter: usize,
 }
@@ -20,20 +23,19 @@ fn init(state: &mut State) {
     state.counter = 0;
 }
 
-fn load(_state: &mut State) {
-    println!("Load!");
+fn reload(_state: &mut State) {
 }
 
 fn update(state: &mut State) -> ShouldQuit {
     state.counter += 1;
-    println!("Update {}", state.counter);
+    print!("Update! {:04}\r", state.counter);
+    std::io::stdout().flush().unwrap();
     ShouldQuit::No
 }
 
 fn unload(_state: &mut State) {
-    println!("Unload!");
 }
 
-fn deinit(_state: &mut State) {
-    println!("Deinit!");
+fn deinit(state: &mut State) {
+    println!("Deinit! Final count was: {}", state.counter);
 }
