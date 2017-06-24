@@ -1,0 +1,11 @@
+[package]
+name = "reload-app"
+version = "0.1.0"
+authors = ["Caleb Jones <code@calebjones.net>"]
+
+[lib]
+name = "reloadapp"
+crate-type = ["dylib"]
+
+[dependencies]
+reload-api = { version="0.1", path="../reload-api" }

@@ -1,0 +1,9 @@
+[package]
+name = "reload-api"
+version = "0.1.0"
+authors = ["Caleb Jones <code@calebjones.net>"]
+
+[dependencies]
+libloading = "0.4"
+error-chain = "0.10"
+notify = "4.0"
