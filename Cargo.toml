@@ -1,5 +1,12 @@
-[workspace]
-members = [
-  "demo",
-  "live-reload",
-]
+[package]
+name = "live-reload"
+version = "0.1.0"
+authors = ["Caleb Jones <code@calebjones.net>"]
+description = "A library to help with live-reloading game development"
+license = "Zlib"
+documentation = "https://docs.rs/live-reloading"
+repository = "https://github.com/porglezomp-misc/live-reloading-rs"
+
+[dependencies]
+libloading = "0.4"
+notify = "4.0"
