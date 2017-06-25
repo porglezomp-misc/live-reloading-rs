@@ -1,4 +1,7 @@
-.DS_Store
 /.pijul/
 /.vscode/
+/target/
+Cargo.lock
+
+.DS_Store
 *.bk
