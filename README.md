@@ -19,4 +19,32 @@ with the library.
 ["Interactive Programming in C"]: http://nullprogram.com/blog/2014/12/23/
 ["Loading Game Code Dynamically"]: https://www.youtube.com/watch?v=WMSBRk5WG58
 
-See the [Documentation](https://docs.rs/live-reload/) for instructions.
+## Getting Started
+
+Add this to your `Cargo.toml`:
+
+```toml
+[lib]
+name = "<your library name>"
+crate-type = ["cdylib"]
+
+[dependencies]
+live-reload = "0.1"
+```
+
+To do live reloading, you'll need to build both a library and a binary. Inside
+the host binary, you'll want to use `live-reload` with:
+
+```rust
+extern crate live_reload;
+```
+
+In the library, you need to use a macro to declare the live-reloading API, so
+you need:
+
+```rust
+#[macro_use] extern crate live_reload;
+```
+
+See the [Documentation](https://docs.rs/live-reload/) for instructions on how to
+use the library to create the library and host program.
