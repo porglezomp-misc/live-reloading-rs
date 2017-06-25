@@ -7,7 +7,7 @@ use live_reload::ShouldQuit;
 
 
 fn main() {
-    let mut app = live_reload::App::new("target/debug/libreloadapp.dylib")
+    let mut app = live_reload::Reloadable::new("target/debug/libreloadapp.dylib")
         .expect("Should load!");
     loop {
         if app.update() == ShouldQuit::Yes {

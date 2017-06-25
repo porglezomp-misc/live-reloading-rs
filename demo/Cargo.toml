@@ -8,4 +8,4 @@ name = "reloadapp"
 crate-type = ["cdylib"]
 
 [dependencies]
-live-reload = { version="0.2", path="../live-reload" }
+live-reload = { version="0.1", path="../live-reload" }
