@@ -29,7 +29,7 @@ name = "<your library name>"
 crate-type = ["cdylib"]
 
 [dependencies]
-live-reload = "0.1"
+live-reload = "0.2"
 ```
 
 To do live reloading, you'll need to build both a library and a binary. Inside

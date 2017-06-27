@@ -6,6 +6,9 @@
 //! Wellons, and the video ["Loading Game Code Dynamically"][] from Handmade
 //! Hero by Casey Muratori.
 //!
+//! ["Interactive Programming in C"]: http://nullprogram.com/blog/2014/12/23/
+//! ["Loading Game Code Dynamically"]: https://www.youtube.com/watch?v=WMSBRk5WG58
+//!
 //! The general idea is that your main host program is a wrapper around a
 //! dynamic library that does all the interesting work of your game. This means
 //! that you can simply reload the library while the game is still running, and
@@ -13,12 +16,36 @@
 //! global state in your library, everything must be owned by the host in order
 //! to avoid getting unloaded with the library.
 //!
-//! ["Interactive Programming in C"]: http://nullprogram.com/blog/2014/12/23/
-//! ["Loading Game Code Dynamically"]: https://www.youtube.com/watch?v=WMSBRk5WG58
+//! In order to call back into the host program, you specify a `Host` type
+//! containing function pointers to services in the host program. This `Host`
+//! struct will be passed along with your program state. The `Host` type should
+//! always be defined in a separate module so that both the host program and the
+//! reloadable library use a consistent host type. The current recommended
+//! method is to define your host type in its own module. Then use that module
+//! from both the host and the reloadable library. If your project organization
+//! puts the common module in a parent, you can always use the `#[path=...]`
+//! meta on the module, for example:
 //!
-//! Currently, this library doesn't provide a good solution for calling back
-//! into the wrapper code, which you want to do for things like allocating
-//! memory. That will hopefully come in a new version of the crate very soon.
+//! ```rust,ignore
+//! #[path="../host_api.rs"]
+//! mod host_api;
+//! ```
+//!
+//! While designing your host and library, keep in mind the role of the two
+//! communication types:
+//!
+//! - State is isolated to the reloadable library, the main program knows
+//!   nothing about it except for its size so that it can keep it allocated.
+//!   This lets you change the contents of the State struct without restarting
+//!   the whole program. This is intended to handle the state of the game world,
+//!   independent of the host program.
+//!
+//! - Host is defined by the host program and the layout is visible to both
+//!   sides of the bridge. This means that it has to remain the same during a
+//!   run of the game engine. This should hold resources that can only be
+//!   produced by the host program, and function pointers to services that can
+//!   only be provided by the host program. (Anything that requires global state
+//!   like system allocators, graphics contexts, input handling, etc etc.)
 //!
 //! See the Host Example and Library Example sections for instructions on how to
 //! build a reloadable application.
@@ -35,9 +62,25 @@
 //! ```rust,no_run
 //! use std::thread;
 //!
+//! mod host_api {
+//!     // This should always be in a different file
+//!     pub struct HostApi {
+//!         pub print: fn(&str),
+//!     }
+//! }
+//! use host_api::HostApi;
+//!
+//! type App = live_reload::Reloadable<HostApi>;
+//!
+//! fn print(msg: &str) {
+//!     print!("{}", msg);
+//! }
+//!
 //! fn main() {
-//!     let mut prog = live_reload::Reloadable::new("target/debug/libreload.dylib")
-//!         .expect("Should successfully load");
+//!     let mut prog = App::new(
+//!         "target/debug/libreload.dylib",
+//!         HostApi { print: print },
+//!     ).expect("Should successfully load");
 //!     'main: loop {
 //!         if prog.update() == live_reload::ShouldQuit::Yes {
 //!             break 'main;
@@ -81,7 +124,17 @@
 //! # fn main() {}
 //! use live_reload::ShouldQuit;
 //!
+//! mod host_api {
+//!     // This should always be in a different file.
+//!     pub struct Host {
+//!         pub print: fn(&str),
+//!     }
+//! }
+//!
+//! use host_api::Host;
+//!
 //! live_reload! {
+//!     host: Host;
 //!     state: State;
 //!     init: my_init;
 //!     reload: my_reload;
@@ -94,32 +147,33 @@
 //!     counter: u64,
 //! }
 //!
-//! fn my_init(state: &mut State) {
+//! fn my_init(host: &mut Host, state: &mut State) {
 //!     state.counter = 0;
-//!     println!("Init! Counter: 0.");
+//!     (host.print)("Init! Counter: 0.");
 //! }
 //!
-//! fn my_reload(state: &mut State) {
-//!     println!("Reloaded at {}.", state.counter);
+//! fn my_reload(host: &mut Host, state: &mut State) {
+//!     (host.print)(&format!("Reloaded at {}.", state.counter));
 //! }
 //!
-//! fn my_update(state: &mut State) -> ShouldQuit {
+//! fn my_update(host: &mut Host, state: &mut State) -> ShouldQuit {
 //!     state.counter += 1;
-//!     println!("Counter: {}.", state.counter);
+//!     (host.print)(&format!("Counter: {}.", state.counter));
 //!     ShouldQuit::No
 //! }
 //!
-//! fn my_unload(state: &mut State) {
-//!     println!("Unloaded at {}.", state.counter);
+//! fn my_unload(host: &mut Host, state: &mut State) {
+//!     (host.print)(&format!("Unloaded at {}.", state.counter));
 //! }
 //!
-//! fn my_deinit(state: &mut State) {
-//!     println!("Goodbye! Reached a final value of {}.", state.counter);
+//! fn my_deinit(host: &mut Host, state: &mut State) {
+//!     (host.print)(&format!("Goodbye! Reached a final value of {}.", state.counter));
 //! }
 //! ```
 //!
 //! [`Reloadable`]: struct.Reloadable.html
 //! [`reload`]: struct.Reloadable.html#method.reload
+//! [`live_reload!`]: macro.live_reload.html
 
 extern crate notify;
 extern crate libloading;
@@ -136,21 +190,21 @@ type Symbol<T> = libloading::os::unix::Symbol<T>;
 #[cfg(windows)]
 type Symbol<T> = libloading::os::windows::Symbol<T>;
 
-struct AppSym {
+struct AppSym<Host> {
     /// This needs to be present so that the library will be closed on drop
     _lib: Library,
-    api: Symbol<*mut internals::ReloadApi>,
+    api: Symbol<*mut internals::ReloadApi<Host>>,
 }
 
+// @Todo: Flesh out this documentation
 /// A `Reloadable` represents a handle to library that can be live reloaded.
-///
-/// Libraries that
-pub struct Reloadable {
+pub struct Reloadable<Host> {
     path: PathBuf,
-    sym: Option<AppSym>,
+    sym: Option<AppSym<Host>>,
     state: Vec<u64>,
     _watcher: RecommendedWatcher,
     rx: Receiver<notify::DebouncedEvent>,
+    host: Host,
 }
 
 /// The errors that can occur while working with a `Reloadable` object.
@@ -163,6 +217,8 @@ pub enum Error {
     Io(std::io::Error),
     /// An error occurred while creating the filesystem watcher.
     Watch(notify::Error),
+    /// The `Host` type of the host and library don't match.
+    MismatchedHost,
 }
 
 impl From<std::io::Error> for Error {
@@ -185,17 +241,22 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {
     fn description(&self) -> &str {
-        match self {
-            &Error::Io(ref err) => err.description(),
-            &Error::Watch(ref err) => err.description(),
+        match *self {
+            Error::Io(ref err) => err.description(),
+            Error::Watch(ref err) => err.description(),
+            Error::MismatchedHost => "mismatch between host and library's Host types",
         }
     }
 }
 
-impl AppSym {
+impl<Host> AppSym<Host> {
     fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
         let library = Library::new(path.as_ref())?;
-        let api = unsafe { library.get::<*mut internals::ReloadApi>(b"RELOAD_API")?.into_raw() };
+        let api = unsafe {
+            library
+                .get::<*mut internals::ReloadApi<Host>>(b"RELOAD_API")?
+                .into_raw()
+        };
         Ok(AppSym {
             _lib: library,
             api: api,
@@ -203,7 +264,7 @@ impl AppSym {
     }
 }
 
-impl Reloadable {
+impl<Host> Reloadable<Host> {
     /// Create a new Reloadable library.
     ///
     /// This takes the path to a dynamic library containing a `RELOAD_API`
@@ -214,7 +275,7 @@ impl Reloadable {
     /// library has changed.
     ///
     /// [`live_reload!`]: macro.live_reload.html
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+    pub fn new<P: AsRef<Path>>(path: P, host: Host) -> Result<Self, Error> {
         let sym = AppSym::new(&path)?;
         let size = (unsafe { &**sym.api }.size)();
         let (tx, rx) = channel();
@@ -231,12 +292,11 @@ impl Reloadable {
             state: Vec::new(),
             _watcher: watcher,
             rx: rx,
+            host: host,
         };
         app.realloc_buffer(size);
         if let Some(AppSym { ref mut api, .. }) = app.sym {
-            unsafe {
-                ((***api).init)(Self::get_state_ptr(&mut app.state));
-            }
+            (unsafe { &***api }.init)(&mut app.host, Self::get_state_ptr(&mut app.state));
         }
         Ok(app)
     }
@@ -244,7 +304,8 @@ impl Reloadable {
     /// Reload the library if it has changed, otherwise do nothing.
     ///
     /// This will consult with the filesystem watcher, and if the library has
-    /// been recreated or updated, it will call [`reload_now`][].
+    /// been recreated or updated, it will reload the library. See
+    /// [`reload_now`][] for details on what happens when a library is reloaded.
     ///
     /// [`reload_now`]: struct.Reloadable.html#method.reload_now
     pub fn reload(&mut self) -> Result<(), Error> {
@@ -281,17 +342,13 @@ impl Reloadable {
     /// [`update`]: struct.Reloadable.html#method.update
     pub fn reload_now(&mut self) -> Result<(), Error> {
         if let Some(AppSym { ref mut api, .. }) = self.sym {
-            unsafe {
-                ((***api).unload)(Self::get_state_ptr(&mut self.state));
-            }
+            (unsafe { &***api }.unload)(&mut self.host, Self::get_state_ptr(&mut self.state));
         }
         self.sym = None;
         let sym = AppSym::new(&self.path)?;
         // @Avoid reallocating if unnecessary
         self.realloc_buffer((unsafe { &**sym.api }.size)());
-        unsafe {
-            ((**sym.api).reload)(Self::get_state_ptr(&mut self.state));
-        }
+        (unsafe { &**sym.api }.reload)(&mut self.host, Self::get_state_ptr(&mut self.state));
         self.sym = Some(sym);
 
         Ok(())
@@ -303,7 +360,7 @@ impl Reloadable {
     /// [`ShouldQuit::No`](enum.ShouldQuit.html#).
     pub fn update(&mut self) -> ShouldQuit {
         if let Some(AppSym { ref mut api, .. }) = self.sym {
-            unsafe { ((***api).update)(Self::get_state_ptr(&mut self.state)) }
+            (unsafe { &***api }.update)(&mut self.host, Self::get_state_ptr(&mut self.state))
         } else {
             ShouldQuit::No
         }
@@ -316,16 +373,22 @@ impl Reloadable {
     }
 
     /// Get a void pointer to the `State` buffer.
-    unsafe fn get_state_ptr(buffer: &mut Vec<u64>) -> *mut () {
+    fn get_state_ptr(buffer: &mut Vec<u64>) -> *mut () {
         buffer.as_mut_ptr() as *mut ()
     }
+
+    /// Get a reference to the `Host` struct>
+    pub fn host(&self) -> &Host { &self.host }
+
+    /// Get a mutable reference to the `Host` struct.
+    pub fn host_mut(&mut self) -> &mut Host { &mut self.host }
 }
 
-impl Drop for Reloadable {
+impl<Host> Drop for Reloadable<Host> {
     fn drop(&mut self) {
         if let Some(AppSym { ref mut api, .. }) = self.sym {
             unsafe {
-                ((***api).deinit)(Self::get_state_ptr(&mut self.state));
+                ((***api).deinit)(&mut self.host, Self::get_state_ptr(&mut self.state));
             }
         }
     }
@@ -358,29 +421,29 @@ pub enum ShouldQuit {
 pub mod internals {
     /// Contains function pointers for all the parts of the reloadable object lifecycle.
     #[repr(C)]
-    pub struct ReloadApi {
+    pub struct ReloadApi<Host> {
         /// Returns the size of the State struct so that the host can allocate
         /// space for it.
         pub size: fn() -> usize,
         /// Initializes the State struct when the program is first started.
-        pub init: fn(*mut ()),
+        pub init: fn(&mut Host, *mut ()),
         /// Makes any necessary updates when the program is reloaded.
         ///
         /// This will probably be normally empty. If you changed the State
         /// struct since the last compile, then it won't necessarily be
         /// correctly initialized. For safety, you should make your State struct
         /// `#[repr(C)]` and only add members at the end.
-        pub reload: fn(*mut ()),
+        pub reload: fn(&mut Host, *mut ()),
         /// Update the
-        pub update: fn(*mut ()) -> super::ShouldQuit,
+        pub update: fn(&mut Host, *mut ()) -> super::ShouldQuit,
         /// Prepare for the library to be unloaded before a new version loads.
         ///
         /// This will probably normally be empty except for short periods in
         /// development when you're making lots of live changes and need to do
         /// some kind of migration.
-        pub unload: fn(*mut ()),
+        pub unload: fn(&mut Host, *mut ()),
         /// Do final shutdowns before the program completely quits.
-        pub deinit: fn(*mut ()),
+        pub deinit: fn(&mut Host, *mut ()),
     }
 }
 
@@ -389,11 +452,12 @@ pub mod internals {
 /// This generates wrappers around higher-level lifecycle functions, and then
 /// exports them in a struct that the reloader can find.
 ///
-/// You need to define a struct that represents the state of your program, and
-/// methods for `init`, `reload`, `update`, `unload`, and `deinit`. `init` and
-/// `deinit` are called at the very beginning and end of the program, and
-/// `reload` and `unload` are called immediately after and before the library is
-/// loaded/reloaded. `update` is called by the wrapping application as needed.
+/// You need to to specify the host API type, define a struct that represents
+/// the state of your program, and then define methods for `init`, `reload`,
+/// `update`, `unload`, and `deinit`. `init` and `deinit` are called at the very
+/// beginning and end of the program, and `reload` and `unload` are called
+/// immediately after and before the library is loaded/reloaded. `update` is
+/// called by the wrapping application as needed.
 ///
 /// # Example
 ///
@@ -401,13 +465,16 @@ pub mod internals {
 /// # #[macro_use] extern crate live_reload;
 /// # fn main() {}
 /// # #[repr(C)] struct State {}
-/// # fn my_init(_: &mut State) {}
-/// # fn my_reload(_: &mut State) {}
-/// # fn my_unload(_: &mut State) {}
-/// # fn my_deinit(_: &mut State) {}
+/// # mod host_api { pub struct Host; }
+/// # use host_api::Host;
+/// # fn my_init(_: &mut Host, _: &mut State) {}
+/// # fn my_reload(_: &mut Host, _: &mut State) {}
+/// # fn my_unload(_: &mut Host, _: &mut State) {}
+/// # fn my_deinit(_: &mut Host, _: &mut State) {}
 /// # use live_reload::ShouldQuit;
-/// # fn my_update(_: &mut State) -> ShouldQuit { ShouldQuit::No }
+/// # fn my_update(_: &mut Host, _: &mut State) -> ShouldQuit { ShouldQuit::No }
 /// live_reload! {
+///     host: host_api::Host;
 ///     state: State;
 ///     init: my_init;
 ///     reload: my_reload;
@@ -418,7 +485,8 @@ pub mod internals {
 /// ```
 #[macro_export]
 macro_rules! live_reload {
-    (state: $State:ty;
+    (host: $Host:ty;
+     state: $State:ty;
      init: $init:ident;
      reload: $reload:ident;
      update: $update:ident;
@@ -429,28 +497,32 @@ macro_rules! live_reload {
             unsafe { &mut *(raw_state as *mut $State) }
         }
 
-        fn init_wrapper(raw_state: *mut ()) {
-            $init(cast(raw_state))
+        fn init_wrapper(host: &mut $Host, raw_state: *mut ()) {
+            $init(host, cast(raw_state))
         }
 
-        fn reload_wrapper(raw_state: *mut ()) {
-            $reload(cast(raw_state))
+        fn reload_wrapper(host: &mut $Host, raw_state: *mut ()) {
+            $reload(host, cast(raw_state))
         }
 
-        fn update_wrapper(raw_state: *mut ()) -> ::live_reload::ShouldQuit {
-            $update(cast(raw_state))
+        fn update_wrapper(host: &mut $Host, raw_state: *mut ())
+            -> ::live_reload::ShouldQuit
+        {
+            $update(host, cast(raw_state))
         }
 
-        fn unload_wrapper(raw_state: *mut ()) {
-            $unload(cast(raw_state))
+        fn unload_wrapper(host: &mut $Host, raw_state: *mut ()) {
+            $unload(host, cast(raw_state))
         }
 
-        fn deinit_wrapper(raw_state: *mut ()) {
-            $deinit(cast(raw_state))
+        fn deinit_wrapper(host: &mut $Host, raw_state: *mut ()) {
+            $deinit(host, cast(raw_state))
         }
 
         #[no_mangle]
-        pub static RELOAD_API: ::live_reload::internals::ReloadApi = ::live_reload::internals::ReloadApi {
+        pub static RELOAD_API: ::live_reload::internals::ReloadApi<$Host> =
+            ::live_reload::internals::ReloadApi
+        {
             size: ::std::mem::size_of::<$State>,
             init: init_wrapper,
             reload: reload_wrapper,

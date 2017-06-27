@@ -1,10 +1,13 @@
-#[macro_use] extern crate live_reload;
+#[macro_use]
+extern crate live_reload;
 
-use std::io::Write;
+mod shared_api;
 
 use live_reload::ShouldQuit;
+use shared_api::Host;
 
 live_reload! {
+    host: Host;
     state: State;
     init: init;
     reload: reload;
@@ -18,24 +21,28 @@ struct State {
     counter: usize,
 }
 
-fn init(state: &mut State) {
-    println!("Init!");
+fn init(host: &mut Host, state: &mut State) {
     state.counter = 0;
+    (host.print)("Init! Counter: 0.\n");
 }
 
-fn reload(_state: &mut State) {
+fn reload(host: &mut Host, state: &mut State) {
+    (host.print)(&format!("Reloaded at {}.\n", state.counter));
 }
 
-fn update(state: &mut State) -> ShouldQuit {
-    state.counter += 1;
-    print!("Update! {:04}\r", state.counter);
-    std::io::stdout().flush().unwrap();
+fn update(host: &mut Host, state: &mut State) -> ShouldQuit {
+    state.counter += 2;
+    (host.print)(&format!("Counter: {}.\n", state.counter));
     ShouldQuit::No
 }
 
-fn unload(_state: &mut State) {
+fn unload(host: &mut Host, state: &mut State) {
+    (host.print)(&format!("Unloaded at {}.\n", state.counter));
 }
 
-fn deinit(state: &mut State) {
-    println!("Deinit! Final count was: {}", state.counter);
+fn deinit(host: &mut Host, state: &mut State) {
+    (host.print)(&format!(
+        "Goodbye! Reached a final value of {}.\n",
+        state.counter
+    ));
 }

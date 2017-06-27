@@ -1,6 +1,6 @@
 [package]
 name = "live-reload"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Caleb Jones <code@calebjones.net>"]
 description = "A library to help with live-reloading game development"
 license = "Zlib"
@@ -10,3 +10,6 @@ repository = "https://github.com/porglezomp-misc/live-reloading-rs"
 [dependencies]
 libloading = "0.4"
 notify = "4.0"
+
+[workspace]
+members = ["demo"]
