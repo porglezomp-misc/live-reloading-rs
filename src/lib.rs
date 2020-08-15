@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![allow(clippy::needless_doctest_main)]
 
 //! A library for doing live-reloading game development.
 //!
@@ -175,15 +176,15 @@
 //! [`reload`]: struct.Reloadable.html#method.reload
 //! [`live_reload!`]: macro.live_reload.html
 
-extern crate notify;
 extern crate libloading;
+extern crate notify;
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use std::sync::mpsc::{channel, Receiver};
+use std::time::Duration;
 
-use notify::{Watcher, RecommendedWatcher};
 use libloading::Library;
+use notify::{RecommendedWatcher, Watcher};
 
 #[cfg(unix)]
 type Symbol<T> = libloading::os::unix::Symbol<T>;
@@ -235,16 +236,10 @@ impl From<notify::Error> for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        write!(fmt, "{:?}", self)
-    }
-}
-
-impl std::error::Error for Error {
-    fn description(&self) -> &str {
         match *self {
-            Error::Io(ref err) => err.description(),
-            Error::Watch(ref err) => err.description(),
-            Error::MismatchedHost => "mismatch between host and library's Host types",
+            Error::Io(ref err) => err.fmt(fmt),
+            Error::Watch(ref err) => err.fmt(fmt),
+            Error::MismatchedHost => "mismatch between host and library's Host types".fmt(fmt),
         }
     }
 }
@@ -257,10 +252,7 @@ impl<Host> AppSym<Host> {
                 .get::<*mut internals::ReloadApi<Host>>(b"RELOAD_API")?
                 .into_raw()
         };
-        Ok(AppSym {
-            _lib: library,
-            api: api,
-        })
+        Ok(AppSym { _lib: library, api })
     }
 }
 
@@ -291,8 +283,8 @@ impl<Host> Reloadable<Host> {
             sym: Some(sym),
             state: Vec::new(),
             _watcher: watcher,
-            rx: rx,
-            host: host,
+            rx,
+            host,
         };
         app.realloc_buffer(size);
         if let Some(AppSym { ref mut api, .. }) = app.sym {
@@ -313,9 +305,7 @@ impl<Host> Reloadable<Host> {
         while let Ok(evt) = self.rx.try_recv() {
             use notify::DebouncedEvent::*;
             match evt {
-                NoticeWrite(ref path) |
-                Write(ref path) |
-                Create(ref path) => {
+                NoticeWrite(ref path) | Write(ref path) | Create(ref path) => {
                     if *path == self.path {
                         should_reload = true;
                     }
@@ -378,10 +368,14 @@ impl<Host> Reloadable<Host> {
     }
 
     /// Get a reference to the `Host` struct>
-    pub fn host(&self) -> &Host { &self.host }
+    pub fn host(&self) -> &Host {
+        &self.host
+    }
 
     /// Get a mutable reference to the `Host` struct.
-    pub fn host_mut(&mut self) -> &mut Host { &mut self.host }
+    pub fn host_mut(&mut self) -> &mut Host {
+        &mut self.host
+    }
 }
 
 impl<Host> Drop for Reloadable<Host> {
@@ -393,7 +387,6 @@ impl<Host> Drop for Reloadable<Host> {
         }
     }
 }
-
 
 /// Should the main program quit? More self-documenting than a boolean!
 ///
@@ -492,7 +485,6 @@ macro_rules! live_reload {
      update: $update:ident;
      unload: $unload:ident;
      deinit: $deinit:ident;) => {
-
         fn cast<'a>(raw_state: *mut ()) -> &'a mut $State {
             unsafe { &mut *(raw_state as *mut $State) }
         }
@@ -505,9 +497,7 @@ macro_rules! live_reload {
             $reload(host, cast(raw_state))
         }
 
-        fn update_wrapper(host: &mut $Host, raw_state: *mut ())
-            -> ::live_reload::ShouldQuit
-        {
+        fn update_wrapper(host: &mut $Host, raw_state: *mut ()) -> ::live_reload::ShouldQuit {
             $update(host, cast(raw_state))
         }
 
@@ -521,14 +511,13 @@ macro_rules! live_reload {
 
         #[no_mangle]
         pub static RELOAD_API: ::live_reload::internals::ReloadApi<$Host> =
-            ::live_reload::internals::ReloadApi
-        {
-            size: ::std::mem::size_of::<$State>,
-            init: init_wrapper,
-            reload: reload_wrapper,
-            update: update_wrapper,
-            unload: unload_wrapper,
-            deinit: deinit_wrapper,
-        };
-    }
+            ::live_reload::internals::ReloadApi {
+                size: ::std::mem::size_of::<$State>,
+                init: init_wrapper,
+                reload: reload_wrapper,
+                update: update_wrapper,
+                unload: unload_wrapper,
+                deinit: deinit_wrapper,
+            };
+    };
 }
