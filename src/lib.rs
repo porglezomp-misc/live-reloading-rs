@@ -306,7 +306,7 @@ impl<Host> Reloadable<Host> {
             use notify::DebouncedEvent::*;
             match evt {
                 NoticeWrite(ref path) | Write(ref path) | Create(ref path) => {
-                    if *path == self.path {
+                    if *path.canonicalize()? == self.path {
                         should_reload = true;
                     }
                 }
