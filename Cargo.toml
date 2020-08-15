@@ -6,6 +6,7 @@ description = "A library to help with live-reloading game development"
 license = "Zlib"
 documentation = "https://docs.rs/live-reloading"
 repository = "https://github.com/porglezomp-misc/live-reloading-rs"
+edition = "2018"
 
 [dependencies]
 libloading = "0.4"

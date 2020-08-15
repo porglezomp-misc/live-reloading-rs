@@ -18,8 +18,8 @@ fn print(msg: &str) {
 }
 
 fn main() {
-    let mut app = App::new("target/debug/libreloadable.dylib", Host { print: print })
-        .expect("Should load!");
+    let mut app =
+        App::new("target/debug/libreloadable.dylib", Host { print }).expect("Should load!");
     loop {
         if app.update() == ShouldQuit::Yes {
             break;
