@@ -347,7 +347,7 @@ impl<Host> Reloadable<Host> {
     #[cfg(windows)]
     fn load(path: &Path) -> Result<AppSym<Host>, Error> {
         let live_path = path.with_extension("live.dll");
-        fs::copy(&path, &live_path)?;
+        std::fs::copy(&path, &live_path)?;
         AppSym::new(&live_path)
     }
 
