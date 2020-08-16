@@ -347,7 +347,25 @@ impl<Host> Reloadable<Host> {
     #[cfg(windows)]
     fn load(path: &Path) -> Result<AppSym<Host>, Error> {
         let live_path = path.with_extension("live.dll");
-        std::fs::copy(&path, &live_path)?;
+        // Every now and then it seems that the unloading process keeps the dll locked, or
+        // another process spies on it, or the source dll is current being written.
+        // In these cases, we retry a few times before giving up.
+        // 20 times 100ms = ~2s
+        const MAX_ATTEMPTS: usize = 20;
+        let mut attempt = 1;
+        'retry: loop {
+            match std::fs::copy(&path, &live_path) {
+                Result::Err(io_err)
+                    if io_err.raw_os_error() == Some(32) && attempt < MAX_ATTEMPTS =>
+                {
+                    std::thread::sleep(Duration::from_millis(100));
+                    attempt += 1;
+                    continue 'retry;
+                }
+                Result::Err(io_err) => return Result::Err(io_err.into()),
+                Result::Ok(_) => break 'retry,
+            }
+        }
         AppSym::new(&live_path)
     }
 
