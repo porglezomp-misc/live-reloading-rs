@@ -206,6 +206,43 @@ pub struct Reloadable<Host> {
     _watcher: RecommendedWatcher,
     rx: Receiver<notify::DebouncedEvent>,
     host: Host,
+    /// On Windows, loading a library may result in temporary errors because of file locking.
+    /// Use this field to modify the maximum number of retries and the delay between them.
+    pub loading_strategy: LoadingStrategy,
+}
+
+/// Windows specific library loading parameters.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LoadingStrategy {
+    /// The maximum number of retry attempts if the loading of the library failed
+    /// with error code 32:
+    /// > The process cannot access the file because it is being used by another process.
+    ///
+    /// Default is 20 (21 attempts). This field is used on Windows only.
+    pub max_retries: usize,
+    /// The delay before each retry attempt.
+    ///
+    /// Default is 100ms. This field is used on Windows only.
+    pub retry_delay: Duration,
+}
+
+impl Default for LoadingStrategy {
+    fn default() -> Self {
+        Self {
+            max_retries: 20,
+            retry_delay: Duration::from_millis(100),
+        }
+    }
+}
+
+impl LoadingStrategy {
+    /// A reloading strategy that never retries.
+    pub const fn no_retries() -> Self {
+        Self {
+            max_retries: 0,
+            retry_delay: Duration::from_millis(0),
+        }
+    }
 }
 
 /// The errors that can occur while working with a `Reloadable` object.
@@ -268,7 +305,7 @@ impl<Host> Reloadable<Host> {
     ///
     /// [`live_reload!`]: macro.live_reload.html
     pub fn new<P: AsRef<Path>>(path: P, host: Host) -> Result<Self, Error> {
-        let sym = Self::load(path.as_ref())?;
+        let sym = Self::load(path.as_ref(), &LoadingStrategy::no_retries())?;
         let size = (unsafe { &**sym.api }.size)();
         let (tx, rx) = channel();
         let mut watcher = notify::watcher(tx, Duration::from_secs(1))?;
@@ -285,6 +322,7 @@ impl<Host> Reloadable<Host> {
             _watcher: watcher,
             rx,
             host,
+            loading_strategy: Default::default(),
         };
         app.realloc_buffer(size);
         if let Some(AppSym { ref mut api, .. }) = app.sym {
@@ -335,7 +373,7 @@ impl<Host> Reloadable<Host> {
             (unsafe { &***api }.unload)(&mut self.host, Self::get_state_ptr(&mut self.state));
         }
         self.sym = None;
-        let sym = Self::load(&self.path)?;
+        let sym = Self::load(&self.path, &self.loading_strategy)?;
         // @Avoid reallocating if unnecessary
         self.realloc_buffer((unsafe { &**sym.api }.size)());
         (unsafe { &**sym.api }.reload)(&mut self.host, Self::get_state_ptr(&mut self.state));
@@ -345,20 +383,18 @@ impl<Host> Reloadable<Host> {
     }
 
     #[cfg(windows)]
-    fn load(path: &Path) -> Result<AppSym<Host>, Error> {
+    fn load(path: &Path, strategy: &LoadingStrategy) -> Result<AppSym<Host>, Error> {
         let live_path = path.with_extension("live.dll");
         // Every now and then it seems that the unloading process keeps the dll locked, or
         // another process spies on it, or the source dll is current being written.
         // In these cases, we retry a few times before giving up.
-        // 20 times 100ms = ~2s
-        const MAX_ATTEMPTS: usize = 20;
         let mut attempt = 1;
         'retry: loop {
             match std::fs::copy(&path, &live_path) {
                 Result::Err(io_err)
-                    if io_err.raw_os_error() == Some(32) && attempt < MAX_ATTEMPTS =>
+                    if io_err.raw_os_error() == Some(32) && attempt <= strategy.max_retries =>
                 {
-                    std::thread::sleep(Duration::from_millis(100));
+                    std::thread::sleep(strategy.retry_delay);
                     attempt += 1;
                     continue 'retry;
                 }
@@ -370,7 +406,7 @@ impl<Host> Reloadable<Host> {
     }
 
     #[cfg(not(windows))]
-    fn load(path: &Path) -> Result<AppSym<Host>, Error> {
+    fn load(path: &Path, _strategy: &LoadingStrategy) -> Result<AppSym<Host>, Error> {
         AppSym::new(&path)
     }
 
