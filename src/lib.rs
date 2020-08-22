@@ -148,9 +148,9 @@
 //!     counter: u64,
 //! }
 //!
-//! fn my_init(host: &mut Host, state: &mut State) {
-//!     state.counter = 0;
+//! fn my_init(host: &mut Host) -> State {
 //!     (host.print)("Init! Counter: 0.");
+//!     State { counter: 0 }
 //! }
 //!
 //! fn my_reload(host: &mut Host, state: &mut State) {
@@ -167,7 +167,7 @@
 //!     (host.print)(&format!("Unloaded at {}.", state.counter));
 //! }
 //!
-//! fn my_deinit(host: &mut Host, state: &mut State) {
+//! fn my_deinit(host: &mut Host, state: State) {
 //!     (host.print)(&format!("Goodbye! Reached a final value of {}.", state.counter));
 //! }
 //! ```
@@ -526,10 +526,10 @@ pub mod internals {
 /// # #[repr(C)] struct State {}
 /// # mod host_api { pub struct Host; }
 /// # use host_api::Host;
-/// # fn my_init(_: &mut Host, _: &mut State) {}
+/// # fn my_init(_: &mut Host) -> State { State {} }
 /// # fn my_reload(_: &mut Host, _: &mut State) {}
 /// # fn my_unload(_: &mut Host, _: &mut State) {}
-/// # fn my_deinit(_: &mut Host, _: &mut State) {}
+/// # fn my_deinit(_: &mut Host, _: State) { }
 /// # use live_reload::ShouldQuit;
 /// # fn my_update(_: &mut Host, _: &mut State) -> ShouldQuit { ShouldQuit::No }
 /// live_reload! {
@@ -556,7 +556,8 @@ macro_rules! live_reload {
         }
 
         fn init_wrapper(host: &mut $Host, raw_state: *mut ()) {
-            $init(host, cast(raw_state))
+            let mut state = $init(host);
+            std::mem::forget(std::mem::replace(cast(raw_state), state));
         }
 
         fn reload_wrapper(host: &mut $Host, raw_state: *mut ()) {
@@ -572,7 +573,8 @@ macro_rules! live_reload {
         }
 
         fn deinit_wrapper(host: &mut $Host, raw_state: *mut ()) {
-            $deinit(host, cast(raw_state))
+            let state = unsafe { std::mem::transmute_copy(cast(raw_state)) };
+            $deinit(host, state);
         }
 
         #[no_mangle]
