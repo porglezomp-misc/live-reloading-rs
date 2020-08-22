@@ -21,9 +21,9 @@ struct State {
     counter: usize,
 }
 
-fn init(host: &mut Host, state: &mut State) {
-    state.counter = 0;
+fn init(host: &mut Host) -> State {
     (host.print)("Init! Counter: 0.\n");
+    State { counter: 0 }
 }
 
 fn reload(host: &mut Host, state: &mut State) {
@@ -40,7 +40,7 @@ fn unload(host: &mut Host, state: &mut State) {
     (host.print)(&format!("Unloaded at {}.\n", state.counter));
 }
 
-fn deinit(host: &mut Host, state: &mut State) {
+fn deinit(host: &mut Host, state: State) {
     (host.print)(&format!(
         "Goodbye! Reached a final value of {}.\n",
         state.counter
